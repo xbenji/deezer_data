@@ -1,0 +1,83 @@
+Deezer Technical Test :
+=======================
+
+Description:
+------------
+
+	Python / mongoDB / PHP
+	L'analyse des logs d'ecoute est realisee en python. Les resultats sont ensuite stockes dans une base mongoDB
+	Les donnes sont accessibles via deux scripts php capables d'interroger la base
+
+
+Arborescence des fichiers et description:
+-----------------------------------------
+
+	batch/batch_top50_country.py	genere les charts par pays				
+	batch/batch_top50_user.py 	   	genere les charts par user
+	batch/deezutils.py 				fonctions utilitaires utilisees par les 2 scripts
+
+	php/get-top50.php				top 50 par country
+	php/get-top50-user.php			top 50 par user
+	php/utils.php					fonction utilitaires
+
+
+Description:
+------------
+
+Le coeur de l'implementation se trouve dans le fichier batch/deezutils.py qui contient les fonctions aggregate() et extractChart().
+La fontion aggregate() prend en entree une table et calcule le count de 'values' (songs) au sein d'un groupe 'key' (pays/user)
+
+	input:
+			A | x 
+			A | x
+			A | z
+			B | z
+
+	output: 
+			{A: {x: 2, z:1}, B: {z: 1}}
+
+
+La fonction	extractChart() effectue l'operation inverse, en retranposant les aggregats en table, avec une colonne supplementaire pour le count des values (poids). Les donnes sont triees par count decroissant et tronquees a une certaine taille (top N)
+
+	input: 
+		{A: {x: 2, z:1}, B: {z: 1}}
+			
+	output:
+			(A, x, 2)
+			(A, z, 1)
+			(B, z, 1)
+
+Ces 2 fonctions permettent de calculer les aggregats d'une traite, ou par partie en stockant des aggregats temporaires (chunks de fichiers, log quotidiens, hebdomadaires etc..). Le traitement de chaque sous ensemble de donnes est alors independant des autres, et peut etre parralellise. Ces aggregats pourront ensuite etre fusionnes par la meme fonction aggregate() qui peut prende en compte les poids des aggregats temporaires.
+
+Les deux cas d'utilisation sont utilises dans l'exercice:
+	
+	batch_top50_country.py:
+	Charts par pays: le script analyse d'une traite et charge en memoire tous les fichiers concernant la periode donnee, accumulant les aggregats de chaque fichier, et les stocke ensuite dans la base de donnee.
+
+	batch_top50_user.py
+	Charts par user (batch_top50_user.py): le script pre-aggrege chaque log quotidien, et refait ensuite une passe sur les resultats intermediaires pour obtenir les charts finaux
+
+Schema de base de donnes:
+-------------------------
+
+ 	mongoDB utilise un format de donnes JSON, et facilite le stockage des listes ou cles/valeurs.
+ 	Une entree dans la base est de la forme:
+
+ 		{ country_id : "FR",
+ 		  charts : [{ song: '12345', count : '12'} , ... , { song: '12222', count : '1'}] }
+
+ 	Le nombre de ligne dans la table est toujours egal au nombre de pays ou user et est plus facilement maintenable.
+ 	Les requetes vont directement retourner le top50 pour une cle donnee, sans traitement de donnees additionel.
+
+ Utilisation:
+ ------------
+
+	$ python batch_top50_country.py 
+		Processing log files...
+		- log_20130801
+		- log_20130802
+		- log_20130803
+		Saving charts to database...
+
+  - Les deux scripts cherchent les fichiers dans le repertoire courant pour a la periode donnee (configurable dans chaque script) de la forme log_20130801 ... log_20130803
+
